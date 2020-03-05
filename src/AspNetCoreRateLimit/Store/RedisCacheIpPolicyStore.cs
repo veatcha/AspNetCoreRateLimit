@@ -1,18 +1,19 @@
 ﻿using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 
 namespace AspNetCoreRateLimit
 {
-    public class DistributedCacheIpPolicyStore : DistributedCacheRateLimitStore<IpRateLimitPolicies>, IIpPolicyStore
+    public class RedisCacheIpPolicyStore : RedisCacheRateLimitStore<IpRateLimitPolicies>, IIpPolicyStore
     {
         private readonly IpRateLimitOptions _options;
         private readonly IpRateLimitPolicies _policies;
 
-        public DistributedCacheIpPolicyStore(
-            IDistributedCache cache,
+        public RedisCacheIpPolicyStore(
+            IConnectionMultiplexer redis,
             IOptions<IpRateLimitOptions> options = null,
-            IOptions<IpRateLimitPolicies> policies = null) : base(cache)
+            IOptions<IpRateLimitPolicies> policies = null) : base(redis)
         {
             _options = options?.Value;
             _policies = policies?.Value;

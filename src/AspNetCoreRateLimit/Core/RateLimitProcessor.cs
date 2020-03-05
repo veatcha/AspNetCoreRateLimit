@@ -28,9 +28,6 @@ namespace AspNetCoreRateLimit
             _config = config;
         }
 
-        /// The key-lock used for limiting requests.
-        private static readonly AsyncKeyLock AsyncLock = new AsyncKeyLock();
-
         public virtual bool IsWhitelisted(ClientRequestIdentity requestIdentity)
         {
             if (_options.ClientWhitelist != null && _options.ClientWhitelist.Contains(requestIdentity.ClientId))
@@ -48,43 +45,10 @@ namespace AspNetCoreRateLimit
             return false;
         }
 
-        public virtual async Task<RateLimitCounter> ProcessRequestAsync(ClientRequestIdentity requestIdentity, RateLimitRule rule, CancellationToken cancellationToken = default)
+        public virtual Task<RateLimitCounter> ProcessRequestAsync(ClientRequestIdentity requestIdentity, RateLimitRule rule, CancellationToken cancellationToken = default)
         {
-            var counter = new RateLimitCounter
-            {
-                Timestamp = DateTime.UtcNow,
-                Count = 1
-            };
-
             var counterId = BuildCounterKey(requestIdentity, rule);
-
-            // serial reads and writes on same key
-            using (await AsyncLock.WriterLockAsync(counterId).ConfigureAwait(false))
-            {
-                var entry = await _counterStore.GetAsync(counterId, cancellationToken);
-
-                if (entry.HasValue)
-                {
-                    // entry has not expired
-                    if (entry.Value.Timestamp + rule.PeriodTimespan.Value >= DateTime.UtcNow)
-                    {
-                        // increment request count
-                        var totalCount = entry.Value.Count + _config.RateIncrementer?.Invoke() ?? 1;
-
-                        // deep copy
-                        counter = new RateLimitCounter
-                        {
-                            Timestamp = entry.Value.Timestamp,
-                            Count = totalCount
-                        };
-                    }
-                }
-
-                // stores: id (string) - timestamp (datetime) - total_requests (long)
-                await _counterStore.SetAsync(counterId, counter, rule.PeriodTimespan.Value, cancellationToken);
-            }
-
-            return counter;
+            return _counterStore.IncrementAsync(counterId, rule.PeriodTimespan.Value, _config.RateIncrementer);
         }
 
         public virtual RateLimitHeaders GetRateLimitHeaders(RateLimitCounter? counter, RateLimitRule rule, CancellationToken cancellationToken = default)
