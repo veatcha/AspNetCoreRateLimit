@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Caching.Distributed;
 using StackExchange.Redis;
 using System;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace AspNetCoreRateLimit
@@ -19,20 +20,22 @@ namespace AspNetCoreRateLimit
             var now = DateTime.UtcNow;
             var intervalNumber = now.Ticks / interval.Ticks;
             var intervalStart = new DateTime(intervalNumber * interval.Ticks, DateTimeKind.Utc);
+            counterId = String.Concat(counterId, intervalStart);  // Ensure late clients don't expire the wrong key
 
-            // Increment the counter and expire the key if required
-            var count = await _redis.GetDatabase().StringIncrementAsync(counterId, 1);
-            if (count == 1)
+            // Increment the counter and expire the key
+            var intervalEnd = (intervalStart + interval) - now;
+            var transaction = _redis.GetDatabase().CreateTransaction();
+            var incr = transaction.StringIncrementAsync(counterId, 1);
+            var expireat = transaction.KeyExpireAsync(counterId, intervalEnd);
+            if (await transaction.ExecuteAsync() && await expireat)
             {
-                var intervalEnd = (intervalStart + interval) - now;
-                await _redis.GetDatabase().KeyExpireAsync(counterId, intervalEnd);
+                return new RateLimitCounter
+                {
+                    Count = await incr,
+                    Timestamp = intervalStart
+                };
             }
-
-            return new RateLimitCounter
-            {
-                Count = count,
-                Timestamp = intervalStart
-            };
+            throw new ExternalException($"Failed to increment rate limit for key {counterId}");
         }
     }
 }
